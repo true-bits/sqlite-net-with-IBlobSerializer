@@ -59,6 +59,18 @@ using Sqlite3Statement = System.IntPtr;
 
 namespace SQLite
 {
+	/// <summary>
+	/// Serializer for custom objects.
+	/// </summary>
+	public interface IBlobSerializer
+	{
+		byte[] Serialize<T>(T obj);
+
+		object Deserialize(byte[] data, Type type);
+
+		bool CanDeserialize(Type type);
+	}
+
 	public class SQLiteException : Exception
 	{
 		public SQLite3.Result Result { get; private set; }
@@ -277,6 +289,11 @@ namespace SQLite
 		static readonly Sqlite3BackupHandle NullBackupHandle = default (Sqlite3BackupHandle);
 
 		/// <summary>
+		/// Blob serializer for custom objects.
+		/// </summary>
+		public IBlobSerializer Serializer { get; private set; }
+
+		/// <summary>
 		/// Gets the database path used by this connection.
 		/// </summary>
 		public string DatabasePath { get; private set; }
@@ -345,8 +362,10 @@ namespace SQLite
 		/// If you use DateTimeOffset properties, it will be always stored as ticks regardingless
 		/// the storeDateTimeAsTicks parameter.
 		/// </param>
-		public SQLiteConnection (string databasePath, bool storeDateTimeAsTicks = true)
-			: this (new SQLiteConnectionString (databasePath, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create, storeDateTimeAsTicks))
+		/// <param name="serializer"></param>
+		public SQLiteConnection (string databasePath, IBlobSerializer serializer, bool storeDateTimeAsTicks = true)
+			: this (new SQLiteConnectionString (databasePath, SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.Create,
+				storeDateTimeAsTicks, serializer))
 		{
 		}
 
@@ -359,6 +378,7 @@ namespace SQLite
 		/// <param name="openFlags">
 		/// Flags controlling how the connection should be opened.
 		/// </param>
+		/// <param name="serializer"></param>
 		/// <param name="storeDateTimeAsTicks">
 		/// Specifies whether to store DateTime properties as ticks (true) or strings (false). You
 		/// absolutely do want to store them as Ticks in all new projects. The value of false is
@@ -367,8 +387,9 @@ namespace SQLite
 		/// If you use DateTimeOffset properties, it will be always stored as ticks regardingless
 		/// the storeDateTimeAsTicks parameter.
 		/// </param>
-		public SQLiteConnection (string databasePath, SQLiteOpenFlags openFlags, bool storeDateTimeAsTicks = true)
-			: this (new SQLiteConnectionString (databasePath, openFlags, storeDateTimeAsTicks))
+		public SQLiteConnection (string databasePath, SQLiteOpenFlags openFlags, IBlobSerializer serializer,
+			bool storeDateTimeAsTicks = true)
+			: this (new SQLiteConnectionString (databasePath, openFlags, storeDateTimeAsTicks, serializer))
 		{
 		}
 
@@ -386,6 +407,7 @@ namespace SQLite
 				throw new InvalidOperationException ("DatabasePath must be specified");
 
 			DatabasePath = connectionString.DatabasePath;
+			Serializer = connectionString.Serializer;
 
 			LibVersionNumber = SQLite3.LibVersionNumber ();
 
@@ -667,7 +689,7 @@ namespace SQLite
 
 				// Build query.
 				var query = "create " + @virtual + "table if not exists \"" + map.TableName + "\" " + @using + "(\n";
-				var decls = map.Columns.Select (p => Orm.SqlDecl (p, StoreDateTimeAsTicks, StoreTimeSpanAsTicks));
+				var decls = map.Columns.Select (p => Orm.SqlDecl (p, StoreDateTimeAsTicks, StoreTimeSpanAsTicks, Serializer));
 				var decl = string.Join (",\n", decls.ToArray ());
 				query += decl;
 				query += ")";
@@ -938,7 +960,8 @@ namespace SQLite
 			}
 
 			foreach (var p in toBeAdded) {
-				var addCol = "alter table \"" + map.TableName + "\" add column " + Orm.SqlDecl (p, StoreDateTimeAsTicks, StoreTimeSpanAsTicks);
+				var addCol = "alter table \"" + map.TableName + "\" add column " +
+				             Orm.SqlDecl (p, StoreDateTimeAsTicks, StoreTimeSpanAsTicks, Serializer);
 				Execute (addCol);
 			}
 		}
@@ -1612,9 +1635,8 @@ namespace SQLite
 		/// <summary>
 		/// Inserts all specified objects.
 		/// </summary>
-		/// <param name="objects">
-		/// An <see cref="IEnumerable"/> of the objects to insert.
-		/// <param name="runInTransaction"/>
+		/// <param name="objects">An <see cref="IEnumerable"/> of the objects to insert.</param>
+		/// <param name="runInTransaction">
 		/// A boolean indicating if the inserts should be wrapped in a transaction.
 		/// </param>
 		/// <returns>
@@ -2272,6 +2294,7 @@ namespace SQLite
 		public string DateTimeStringFormat { get; }
 		public System.Globalization.DateTimeStyles DateTimeStyle { get; }
 		public object Key { get; }
+		public IBlobSerializer Serializer { get; }
 		public SQLiteOpenFlags OpenFlags { get; }
 		public Action<SQLiteConnection> PreKeyAction { get; }
 		public Action<SQLiteConnection> PostKeyAction { get; }
@@ -2299,6 +2322,7 @@ namespace SQLite
 		/// <param name="databasePath">
 		/// Specifies the path to the database file.
 		/// </param>
+		/// <param name="serializer"></param>
 		/// <param name="storeDateTimeAsTicks">
 		/// Specifies whether to store DateTime properties as ticks (true) or strings (false). You
 		/// absolutely do want to store them as Ticks in all new projects. The value of false is
@@ -2307,8 +2331,9 @@ namespace SQLite
 		/// If you use DateTimeOffset properties, it will be always stored as ticks regardingless
 		/// the storeDateTimeAsTicks parameter.
 		/// </param>
-		public SQLiteConnectionString (string databasePath, bool storeDateTimeAsTicks = true)
-			: this (databasePath, SQLiteOpenFlags.Create | SQLiteOpenFlags.ReadWrite, storeDateTimeAsTicks)
+		public SQLiteConnectionString (string databasePath, IBlobSerializer serializer,
+			bool storeDateTimeAsTicks = true)
+			: this (databasePath, SQLiteOpenFlags.Create | SQLiteOpenFlags.ReadWrite, storeDateTimeAsTicks, serializer)
 		{
 		}
 
@@ -2326,6 +2351,7 @@ namespace SQLite
 		/// If you use DateTimeOffset properties, it will be always stored as ticks regardingless
 		/// the storeDateTimeAsTicks parameter.
 		/// </param>
+		/// <param name="serializer"></param>
 		/// <param name="key">
 		/// Specifies the encryption key to use on the database. Should be a string or a byte[].
 		/// </param>
@@ -2338,8 +2364,11 @@ namespace SQLite
 		/// <param name="vfsName">
 		/// Specifies the Virtual File System to use on the database.
 		/// </param>
-		public SQLiteConnectionString (string databasePath, bool storeDateTimeAsTicks, object key = null, Action<SQLiteConnection> preKeyAction = null, Action<SQLiteConnection> postKeyAction = null, string vfsName = null)
-			: this (databasePath, SQLiteOpenFlags.Create | SQLiteOpenFlags.ReadWrite, storeDateTimeAsTicks, key, preKeyAction, postKeyAction, vfsName)
+		public SQLiteConnectionString (string databasePath, bool storeDateTimeAsTicks, IBlobSerializer serializer,
+			object key = null, Action<SQLiteConnection> preKeyAction = null,
+			Action<SQLiteConnection> postKeyAction = null, string vfsName = null)
+			: this (databasePath, SQLiteOpenFlags.Create | SQLiteOpenFlags.ReadWrite, storeDateTimeAsTicks, serializer,
+				key, preKeyAction, postKeyAction, vfsName)
 		{
 		}
 
@@ -2381,7 +2410,8 @@ namespace SQLite
 		/// only here for backwards compatibility. There is a *significant* speed advantage, with no
 		/// down sides, when setting storeTimeSpanAsTicks = true.
 		/// </param>
-		public SQLiteConnectionString (string databasePath, SQLiteOpenFlags openFlags, bool storeDateTimeAsTicks, object key = null, Action<SQLiteConnection> preKeyAction = null, Action<SQLiteConnection> postKeyAction = null, string vfsName = null, string dateTimeStringFormat = DateTimeSqliteDefaultFormat, bool storeTimeSpanAsTicks = true)
+		/// <param name="serializer"></param>
+		public SQLiteConnectionString (string databasePath, SQLiteOpenFlags openFlags, bool storeDateTimeAsTicks, IBlobSerializer serializer, object key = null, Action<SQLiteConnection> preKeyAction = null, Action<SQLiteConnection> postKeyAction = null, string vfsName = null, string dateTimeStringFormat = DateTimeSqliteDefaultFormat, bool storeTimeSpanAsTicks = true)
 		{
 			if (key != null && !((key is byte[]) || (key is string)))
 				throw new ArgumentException ("Encryption keys must be strings or byte arrays", nameof (key));
@@ -2390,6 +2420,7 @@ namespace SQLite
 			StoreDateTimeAsTicks = storeDateTimeAsTicks;
 			StoreTimeSpanAsTicks = storeTimeSpanAsTicks;
 			DateTimeStringFormat = dateTimeStringFormat;
+			Serializer = serializer;
 			DateTimeStyle = "o".Equals (DateTimeStringFormat, StringComparison.OrdinalIgnoreCase) || "r".Equals (DateTimeStringFormat, StringComparison.OrdinalIgnoreCase) ? System.Globalization.DateTimeStyles.RoundtripKind : System.Globalization.DateTimeStyles.None;
 			Key = key;
 			PreKeyAction = preKeyAction;
@@ -2861,9 +2892,9 @@ namespace SQLite
 			return obj.GetType ();
 		}
 
-		public static string SqlDecl (TableMapping.Column p, bool storeDateTimeAsTicks, bool storeTimeSpanAsTicks)
+		public static string SqlDecl (TableMapping.Column p, bool storeDateTimeAsTicks, bool storeTimeSpanAsTicks, IBlobSerializer serializer)
 		{
-			string decl = "\"" + p.Name + "\" " + SqlType (p, storeDateTimeAsTicks, storeTimeSpanAsTicks) + " ";
+			string decl = "\"" + p.Name + "\" " + SqlType (p, storeDateTimeAsTicks, storeTimeSpanAsTicks, serializer) + " ";
 
 			if (p.IsPK) {
 				decl += "primary key ";
@@ -2881,7 +2912,7 @@ namespace SQLite
 			return decl;
 		}
 
-		public static string SqlType (TableMapping.Column p, bool storeDateTimeAsTicks, bool storeTimeSpanAsTicks)
+		public static string SqlType (TableMapping.Column p, bool storeDateTimeAsTicks, bool storeTimeSpanAsTicks, IBlobSerializer serializer)
 		{
 			var clrType = p.ColumnType;
 			if (clrType == typeof (Boolean) || clrType == typeof (Byte) || clrType == typeof (UInt16) || clrType == typeof (SByte) || clrType == typeof (Int16) || clrType == typeof (Int32) || clrType == typeof (UInt32) || clrType == typeof (Int64)) {
@@ -2919,6 +2950,8 @@ namespace SQLite
 			else if (clrType == typeof (Guid)) {
 				return "varchar(36)";
 			}
+			else if (serializer != null && serializer.CanDeserialize(p.ColumnType))
+				return "blob";
 			else {
 				throw new NotSupportedException ("Don't know about " + clrType);
 			}
@@ -3259,13 +3292,13 @@ namespace SQLite
 					b.Index = nextIdx++;
 				}
 
-				BindParameter (stmt, b.Index, b.Value, _conn.StoreDateTimeAsTicks, _conn.DateTimeStringFormat, _conn.StoreTimeSpanAsTicks);
+				BindParameter (stmt, b.Index, b.Value, _conn.StoreDateTimeAsTicks, _conn.DateTimeStringFormat, _conn.StoreTimeSpanAsTicks, _conn.Serializer);
 			}
 		}
 
 		static IntPtr NegativePointer = new IntPtr (-1);
 
-		internal static void BindParameter (Sqlite3Statement stmt, int index, object value, bool storeDateTimeAsTicks, string dateTimeStringFormat, bool storeTimeSpanAsTicks)
+		internal static void BindParameter (Sqlite3Statement stmt, int index, object value, bool storeDateTimeAsTicks, string dateTimeStringFormat, bool storeTimeSpanAsTicks, IBlobSerializer serializer)
 		{
 			if (value == null) {
 				SQLite3.BindNull (stmt, index);
@@ -3333,6 +3366,10 @@ namespace SQLite
 							SQLite3.BindText (stmt, index, enumInfo.EnumValues[enumIntValue], -1, NegativePointer);
 						else
 							SQLite3.BindInt (stmt, index, enumIntValue);
+					}
+					else if (serializer != null && serializer.CanDeserialize (value.GetType ())) {
+						var numArray = serializer.Serialize (value);
+						SQLite3.BindBlob (stmt, index, numArray, numArray.Length, NegativePointer);
 					}
 					else {
 						throw new NotSupportedException ("Cannot store type: " + Orm.GetType (value));
@@ -3453,6 +3490,9 @@ namespace SQLite
 				else if (clrType == typeof (UriBuilder)) {
 					var text = SQLite3.ColumnString (stmt, index);
 					return new UriBuilder (text);
+				}
+				else if (_conn.Serializer != null && _conn.Serializer.CanDeserialize (clrType)) {
+					return _conn.Serializer.Deserialize (SQLite3.ColumnByteArray (stmt, index), clrType);
 				}
 				else {
 					throw new NotSupportedException ("Don't know how to read " + clrType);
@@ -3722,9 +3762,11 @@ namespace SQLite
 			//bind the values.
 			if (source != null) {
 				for (int i = 0; i < source.Length; i++) {
-					SQLiteCommand.BindParameter (Statement, i + 1, source[i], Connection.StoreDateTimeAsTicks, Connection.DateTimeStringFormat, Connection.StoreTimeSpanAsTicks);
+					SQLiteCommand.BindParameter (Statement, i + 1, source[i], Connection.StoreDateTimeAsTicks,
+						Connection.DateTimeStringFormat, Connection.StoreTimeSpanAsTicks, Connection.Serializer);
 				}
 			}
+
 			r = SQLite3.Step (Statement);
 
 			if (r == SQLite3.Result.Done) {

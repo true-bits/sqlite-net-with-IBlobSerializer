@@ -132,6 +132,7 @@ namespace SQLite
 		/// <param name="databasePath">
 		/// Specifies the path to the database file.
 		/// </param>
+		/// <param name="serializer"></param>
 		/// <param name="storeDateTimeAsTicks">
 		/// Specifies whether to store DateTime properties as ticks (true) or strings (false). You
 		/// absolutely do want to store them as Ticks in all new projects. The value of false is
@@ -140,8 +141,8 @@ namespace SQLite
 		/// If you use DateTimeOffset properties, it will be always stored as ticks regardingless
 		/// the storeDateTimeAsTicks parameter.
 		/// </param>
-		public SQLiteAsyncConnection (string databasePath, bool storeDateTimeAsTicks = true)
-			: this (new SQLiteConnectionString (databasePath, SQLiteOpenFlags.Create | SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.FullMutex, storeDateTimeAsTicks))
+		public SQLiteAsyncConnection (string databasePath, IBlobSerializer serializer, bool storeDateTimeAsTicks = true)
+			: this (new SQLiteConnectionString (databasePath, SQLiteOpenFlags.Create | SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.FullMutex, storeDateTimeAsTicks, serializer))
 		{
 		}
 
@@ -155,6 +156,7 @@ namespace SQLite
 		/// Flags controlling how the connection should be opened.
 		/// Async connections should have the FullMutex flag set to provide best performance.
 		/// </param>
+		/// <param name="serializer"></param>
 		/// <param name="storeDateTimeAsTicks">
 		/// Specifies whether to store DateTime properties as ticks (true) or strings (false). You
 		/// absolutely do want to store them as Ticks in all new projects. The value of false is
@@ -163,8 +165,8 @@ namespace SQLite
 		/// If you use DateTimeOffset properties, it will be always stored as ticks regardingless
 		/// the storeDateTimeAsTicks parameter.
 		/// </param>
-		public SQLiteAsyncConnection (string databasePath, SQLiteOpenFlags openFlags, bool storeDateTimeAsTicks = true)
-			: this (new SQLiteConnectionString (databasePath, openFlags, storeDateTimeAsTicks))
+		public SQLiteAsyncConnection (string databasePath, SQLiteOpenFlags openFlags, IBlobSerializer serializer, bool storeDateTimeAsTicks = true)
+			: this (new SQLiteConnectionString (databasePath, openFlags, storeDateTimeAsTicks, serializer))
 		{
 		}
 
@@ -1030,9 +1032,8 @@ namespace SQLite
 		/// <summary>
 		/// Inserts all specified objects.
 		/// </summary>
-		/// <param name="objects">
-		/// An <see cref="IEnumerable"/> of the objects to insert.
-		/// <param name="runInTransaction"/>
+		/// <param name="objects">An <see cref="IEnumerable"/> of the objects to insert.</param>
+		/// <param name="runInTransaction">
 		/// A boolean indicating if the inserts should be wrapped in a transaction.
 		/// </param>
 		/// <returns>
